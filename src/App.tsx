@@ -176,7 +176,7 @@ export default function App() {
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md">
               <Activity size={20} />
             </div>
-            <h1 className="text-lg font-bold tracking-tight uppercase tracking-widest text-indigo-700">Crypto Analytics Pro</h1>
+            <h1 className="text-lg font-bold tracking-tight uppercase tracking-widest text-indigo-700">Financial Modelling Pro</h1>
           </div>
 
           <form onSubmit={handleTickerSubmit} className="relative w-64">
