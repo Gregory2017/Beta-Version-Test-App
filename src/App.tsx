@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { standardDeviation } from 'simple-statistics';
 import * as finance from './services/financeService';
+import * as api from './services/apiService';
 
 // --- Types ---
 interface AssetData {
@@ -69,21 +70,14 @@ export default function App() {
     setError(null);
     
     try {
-      const [cryptoRes, quoteRes] = await Promise.all([
-        fetch(`/api/crypto/${t}`),
-        fetch(`/api/quote/${t}`)
+      const [rawData, qData] = await Promise.all([
+        api.fetchBinanceCandles(t),
+        api.fetchBinanceQuote(t).catch(err => {
+          console.warn('Quote fetch failed, will derive from history:', err);
+          return null;
+        })
       ]);
-
-      if (!cryptoRes.ok) {
-        const errData = await cryptoRes.json().catch(() => ({}));
-        throw new Error(errData.error || `Failed to fetch price data (Status: ${cryptoRes.status})`);
-      }
-      const rawData = await cryptoRes.json();
       
-      if (!Array.isArray(rawData)) {
-        throw new Error('Invalid data format received from server');
-      }
-
       const formattedData = rawData.map((d: any) => ({
         date: new Date(d.date).toLocaleDateString(),
         close: d.close,
@@ -95,8 +89,7 @@ export default function App() {
       
       setData(formattedData);
 
-      if (quoteRes.ok) {
-        const qData = await quoteRes.json();
+      if (qData) {
         setQuote(qData);
       } else if (formattedData.length > 0) {
         const latest = rawData[rawData.length - 1];
