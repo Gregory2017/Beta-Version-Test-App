@@ -11,7 +11,7 @@ import { standardDeviation } from 'simple-statistics';
 import * as finance from './services/financeService';
 
 // --- Types ---
-interface StockData {
+interface AssetData {
   date: string;
   close: number;
   open: number;
@@ -55,9 +55,9 @@ const StatBox = ({ label, value, trend, icon: Icon }: any) => (
 // --- Main App ---
 
 export default function App() {
-  const [ticker, setTicker] = useState('TSLA');
+  const [ticker, setTicker] = useState('BTC');
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState<StockData[]>([]);
+  const [data, setData] = useState<AssetData[]>([]);
   const [quote, setQuote] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'price' | 'technical'>('price');
@@ -69,16 +69,16 @@ export default function App() {
     setError(null);
     
     try {
-      const [stockRes, quoteRes] = await Promise.all([
-        fetch(`/api/stock/${t}`),
+      const [cryptoRes, quoteRes] = await Promise.all([
+        fetch(`/api/crypto/${t}`),
         fetch(`/api/quote/${t}`)
       ]);
 
-      if (!stockRes.ok) {
-        const errData = await stockRes.json().catch(() => ({}));
-        throw new Error(errData.error || `Failed to fetch price data (Status: ${stockRes.status})`);
+      if (!cryptoRes.ok) {
+        const errData = await cryptoRes.json().catch(() => ({}));
+        throw new Error(errData.error || `Failed to fetch price data (Status: ${cryptoRes.status})`);
       }
-      const rawData = await stockRes.json();
+      const rawData = await cryptoRes.json();
       
       if (!Array.isArray(rawData)) {
         throw new Error('Invalid data format received from server');
@@ -176,7 +176,7 @@ export default function App() {
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md">
               <Activity size={20} />
             </div>
-            <h1 className="text-lg font-bold tracking-tight uppercase tracking-widest text-indigo-700">Financial Modelling Pro</h1>
+            <h1 className="text-lg font-bold tracking-tight uppercase tracking-widest text-indigo-700">Crypto Analytics Pro</h1>
           </div>
 
           <form onSubmit={handleTickerSubmit} className="relative w-64">
@@ -185,7 +185,7 @@ export default function App() {
               value={ticker}
               onChange={(e) => setTicker(e.target.value.toUpperCase())}
               className="w-full bg-slate-100 border-transparent rounded-full py-2 pl-4 pr-10 text-sm font-bold focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all"
-              placeholder="Search Ticker (e.g. AAPL, BTC)..."
+              placeholder="Search pairs (e.g. BTC, ETH)..."
             />
             <button type="submit" className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-indigo-600">
               <Search size={16} />
@@ -360,7 +360,7 @@ export default function App() {
                       <div className="flex justify-between items-center">
                         <span className="text-sm text-slate-500">Source</span>
                         <span className="font-bold text-indigo-600">
-                          {data.length > 500 ? 'Live-HD' : 'Model-Sim'}
+                          Binance Live
                         </span>
                       </div>
                       <div className="flex justify-between items-center">
