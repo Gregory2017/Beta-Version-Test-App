@@ -13,6 +13,7 @@ const PORT = 3000;
 
 // Keys setup
 const FMP_API_KEY = process.env.FMP_API_KEY || "SgfXZjqX7NK8nSxPa0sqjPrOZLzGYPp0";
+const FINNHUB_API_KEY = process.env.FINNHUB_API_KEY || "d702knpr01qtb4r96r4gd702knpr01qtb4r96r50";
 
 const SP500_TICKERS = new Set([
   "MMM","AOS","ABT","ABBV","ABMD","ACN","ATVI","ADM","AAP","AES",
@@ -173,6 +174,43 @@ async function fetchYahooCandles(ticker: string, days: number = 730) {
   }).filter(Boolean);
 }
 
+async function fetchFinnhubQuote(symbol: string) {
+  const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Finnhub quote error: ${res.statusText}`);
+  const data: any = await res.json();
+  if (!data.c) throw new Error(`Finnhub quote: No data for ${symbol}`);
+  return {
+    regularMarketPrice: data.c,
+    regularMarketChange: data.d,
+    regularMarketChangePercent: data.dp,
+    fiftyTwoWeekHigh: data.h,
+    fiftyTwoWeekLow: data.l,
+    open: data.o,
+    previousClose: data.pc,
+    marketCap: 0,
+    volume: 0
+  };
+}
+
+async function fetchFinnhubCandles(symbol: string, days: number = 730) {
+  const to = Math.floor(Date.now() / 1000);
+  const from = to - (days * 24 * 60 * 60);
+  const url = `https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=D&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`;
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`Finnhub historical error: ${res.statusText}`);
+  const data: any = await res.json();
+  if (data.s !== "ok") return [];
+  return data.t.map((timestamp: number, i: number) => ({
+    date: new Date(timestamp * 1000).toISOString(),
+    close: data.c[i],
+    open: data.o[i],
+    high: data.h[i],
+    low: data.l[i],
+    volume: data.v[i]
+  }));
+}
+
 // Middleware
 app.use(express.json());
 app.use((req, res, next) => {
@@ -193,40 +231,29 @@ app.get("/api/stock/:ticker", async (req, res) => {
       data = await fetchBinanceCandles(ticker);
     } else {
       try {
-        data = await fetchFMPCandles(ticker);
-      } catch (fmpErr: any) {
-        console.warn(`FMP historical failed for ${ticker}, trying Yahoo:`, fmpErr.message);
+        // Try Finnhub first, then FMP, then Yahoo
+        data = await fetchFinnhubCandles(ticker);
+        if (!data || data.length === 0) throw new Error("Finnhub no data");
+      } catch (finnhubErr: any) {
+        console.warn(`Finnhub historical failed for ${ticker}, trying FMP:`, finnhubErr.message);
         try {
-          data = await fetchYahooCandles(ticker);
-        } catch (yahooErr: any) {
-          console.warn(`Yahoo historical failed for ${ticker}:`, yahooErr.message);
-          throw new Error(`All history providers failed`);
+          data = await fetchFMPCandles(ticker);
+        } catch (fmpErr: any) {
+          console.warn(`FMP historical failed for ${ticker}, trying Yahoo:`, fmpErr.message);
+          try {
+            data = await fetchYahooCandles(ticker);
+          } catch (yahooErr: any) {
+            console.warn(`Yahoo historical failed for ${ticker}:`, yahooErr.message);
+            throw new Error(`All history providers failed`);
+          }
         }
       }
     }
     if (!data || data.length === 0) throw new Error("No data");
     res.json(data);
   } catch (error: any) {
-    let anchorPrice = 200;
-    try {
-      const quote = isCrypto ? await fetchBinanceQuote(ticker) : await fetchFMPQuote(ticker);
-      anchorPrice = quote.regularMarketPrice;
-    } catch (e) {}
-    const mockData = Array.from({ length: 365 }, (_, i) => {
-      const date = new Date();
-      date.setDate(date.getDate() - (365 - i));
-      const variance = 1 + (Math.random() - 0.5) * 0.02;
-      const base = anchorPrice * (0.8 + (i / 365) * 0.2) * variance; 
-      return {
-        date: date.toISOString(),
-        close: i === 364 ? anchorPrice : base,
-        open: base * 0.99,
-        high: base * 1.01,
-        low: base * 0.98,
-        volume: 1000000
-      };
-    });
-    res.json(mockData);
+    console.error(`Stock history fetch failed for ${ticker}:`, error.message);
+    res.status(500).json({ error: `Failed to fetch price data for ${ticker}: ${error.message}` });
   }
 });
 
@@ -241,14 +268,17 @@ app.get("/api/quote/:ticker", async (req, res) => {
       res.json(data);
     } else {
       try {
+        const data = await fetchFinnhubQuote(ticker);
+        res.json(data);
+      } catch (finnhubErr: any) {
+        console.warn(`Finnhub quote failed for ${ticker}, trying FMP:`, finnhubErr.message);
         const data = await fetchFMPQuote(ticker);
         res.json(data);
-      } catch (e: any) {
-        res.json({ regularMarketPrice: 200, regularMarketChange: 0, regularMarketChangePercent: 0, symbol: ticker, name: ticker });
       }
     }
   } catch (error: any) {
-    res.json({ regularMarketPrice: 150, regularMarketChange: 0 });
+    console.error(`Quote fetch failed for ${ticker}:`, error.message);
+    res.status(500).json({ error: `Failed to fetch quote for ${ticker}: ${error.message}` });
   }
 });
 
