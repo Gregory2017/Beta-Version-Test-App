@@ -108,8 +108,17 @@ async function fetchBinanceCandles(ticker: string, days: number = 730) {
 
 async function fetchFMPQuote(symbol: string) {
   const url = `https://financialmodelingprep.com/api/v3/quote/${symbol}?apikey=${FMP_API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`FMP quote error: ${res.statusText}`);
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    }
+  });
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "No body");
+    console.error(`FMP quote error status: ${res.status}, body: ${errorBody}`);
+    throw new Error(`FMP quote error: ${res.statusText}`);
+  }
   const data: any = await res.json();
   if (!data || data.length === 0) throw new Error(`FMP quote: No data for ${symbol}`);
   const quote = data[0];
@@ -133,8 +142,17 @@ async function fetchFMPCandles(symbol: string, days: number = 730) {
   const fromStr = fromDate.toISOString().split('T')[0];
   const toStr = toDate.toISOString().split('T')[0];
   const url = `https://financialmodelingprep.com/api/v3/historical-price-full/${symbol}?from=${fromStr}&to=${toStr}&apikey=${FMP_API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`FMP historical data error: ${res.statusText}`);
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    }
+  });
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "No body");
+    console.error(`FMP historical error status: ${res.status}, body: ${errorBody}`);
+    throw new Error(`FMP historical data error: ${res.statusText}`);
+  }
   const data: any = await res.json();
   if (!data.historical || data.historical.length === 0) return [];
   return data.historical.reverse().map((d: any) => ({
@@ -152,9 +170,16 @@ async function fetchYahooCandles(ticker: string, days: number = 730) {
   const range = days > 365 ? "2y" : "1y";
   const url = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?interval=1d&range=${range}`;
   const res = await fetch(url, {
-    headers: { 'User-Agent': 'Mozilla/5.0' }
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    }
   });
-  if (!res.ok) throw new Error(`Yahoo Finance error: ${res.statusText}`);
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "No body");
+    console.error(`Yahoo error status: ${res.status}, body: ${errorBody}`);
+    throw new Error(`Yahoo Finance error: ${res.statusText}`);
+  }
   const data: any = await res.json();
   if (!data.chart?.result?.[0]) throw new Error("Yahoo Finance: No data found");
   const result = data.chart.result[0];
@@ -176,8 +201,17 @@ async function fetchYahooCandles(ticker: string, days: number = 730) {
 
 async function fetchFinnhubQuote(symbol: string) {
   const url = `https://finnhub.io/api/v1/quote?symbol=${symbol}&token=${FINNHUB_API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Finnhub quote error: ${res.statusText}`);
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    }
+  });
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "No body");
+    console.error(`Finnhub quote error status: ${res.status}, body: ${errorBody}`);
+    throw new Error(`Finnhub quote error: ${res.statusText}`);
+  }
   const data: any = await res.json();
   if (!data.c) throw new Error(`Finnhub quote: No data for ${symbol}`);
   return {
@@ -197,8 +231,17 @@ async function fetchFinnhubCandles(symbol: string, days: number = 730) {
   const to = Math.floor(Date.now() / 1000);
   const from = to - (days * 24 * 60 * 60);
   const url = `https://finnhub.io/api/v1/stock/candle?symbol=${symbol}&resolution=D&from=${from}&to=${to}&token=${FINNHUB_API_KEY}`;
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`Finnhub historical error: ${res.statusText}`);
+  const res = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Accept': 'application/json'
+    }
+  });
+  if (!res.ok) {
+    const errorBody = await res.text().catch(() => "No body");
+    console.error(`Finnhub candle error status: ${res.status}, body: ${errorBody}`);
+    throw new Error(`Finnhub historical error: ${res.statusText}`);
+  }
   const data: any = await res.json();
   if (data.s !== "ok") return [];
   return data.t.map((timestamp: number, i: number) => ({
