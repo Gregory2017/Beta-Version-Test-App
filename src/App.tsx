@@ -10,6 +10,7 @@ import {
 import { standardDeviation } from 'simple-statistics';
 import * as finance from './services/financeService';
 import * as api from './services/apiService';
+import * as hill from './services/hillEstimatorService';
 
 // --- Types ---
 interface AssetData {
@@ -57,11 +58,14 @@ const StatBox = ({ label, value, trend, icon: Icon }: any) => (
 
 export default function App() {
   const [ticker, setTicker] = useState('BTC');
+  const [activeTicker, setActiveTicker] = useState('BTC');
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState<AssetData[]>([]);
   const [quote, setQuote] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'price' | 'technical'>('price');
+  const [activeTab, setActiveTab] = useState<'price' | 'technical' | 'hill'>('price');
+  const [macroAlpha, setMacroAlpha] = useState<{ alpha: number; observations: number; k: number } | null>(null);
+  const [macroLoading, setMacroLoading] = useState(false);
 
   console.log('App rendering, loading:', loading, 'data length:', data.length);
 
@@ -88,6 +92,7 @@ export default function App() {
       }));
       
       setData(formattedData);
+      setActiveTicker(t);
 
       if (qData) {
         setQuote(qData);
@@ -121,16 +126,46 @@ export default function App() {
     fetchData(ticker);
   };
 
+  const fetchMacroData = async () => {
+    if (macroAlpha || macroLoading) return;
+    setMacroLoading(true);
+    try {
+      const results = await Promise.all(
+        api.MACRO_TICKERS.map(t => 
+          api.fetchBinanceCandles(t, 360).catch(() => [] as api.AssetData[])
+        )
+      );
+      const multiReturns = results
+        .filter(r => r.length > 200)
+        .map(r => hill.calculateReturns(r.map(d => d.close), true));
+      
+      const macro = hill.calculateMacroHill(multiReturns);
+      setMacroAlpha(macro);
+    } catch (err) {
+      console.error('Macro data fetch error:', err);
+    } finally {
+      setMacroLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'hill') {
+      fetchMacroData();
+    }
+  }, [activeTab]);
+
   const prices = data.map(d => d.close);
   
   // Technical Indicators Calculation
   const sma50 = finance.calculateSMA(prices, 50);
   const sma200 = finance.calculateSMA(prices, 200);
+  const ema50 = finance.calculateEMA(prices, 50);
+  const ema200 = finance.calculateEMA(prices, 200);
   const rsi = finance.calculateRSI(prices);
   const { macd: macdLine, signal: signalLine, histogram } = finance.calculateMACD(prices);
 
   // Cross Detection
-  const getCrossStatus = () => {
+  const crossStatus = (() => {
     if (sma50.length < 2 || sma200.length < 2) return null;
     const lastIdx = sma50.length - 1;
     const prevIdx = lastIdx - 1;
@@ -146,14 +181,32 @@ export default function App() {
     if (s50_prev >= s200_prev && s50_curr < s200_curr) return { type: 'Death Cross', color: 'text-rose-600', icon: ShieldAlert };
     
     return s50_curr > s200_curr ? { type: 'Bullish Trend', color: 'text-indigo-600', icon: TrendingUp } : { type: 'Bearish Trend', color: 'text-slate-600', icon: TrendingDown };
-  };
+  })();
 
-  const crossStatus = getCrossStatus();
+  // Hill Estimator Calculation
+  const allReturns = hill.calculateReturns(prices, true);
+  
+  const microReturns = allReturns.slice(-180); // Precise 180-day current risk window
+  const microHill = hill.calculateMicroHill(microReturns);
+  
+  const hillPlotData = microHill.ks.map((k, i) => ({
+    k,
+    alpha: microHill.alphas[i]
+  }));
+  
+  const rollingAlphaSeries = hill.calculateRollingHill(allReturns, 180);
+  
+  const rollingHillData = rollingAlphaSeries.map(r => ({
+    date: data[r.dateIndex]?.date,
+    alpha: r.alpha
+  }));
 
   const technicalData = data.map((d, i) => ({
     ...d,
     sma50: sma50[i],
     sma200: sma200[i],
+    ema50: ema50[i],
+    ema200: ema200[i],
     rsi: rsi[i],
     macd: macdLine[i],
     signal: signalLine[i],
@@ -206,8 +259,8 @@ export default function App() {
             {/* Header Stats */}
             <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
               <div>
-                <h2 className="text-3xl font-bold text-slate-900">{ticker} Price Movement</h2>
-                <p className="text-slate-500 font-medium">Historical performance over the last 365 days</p>
+                <h2 className="text-3xl font-bold text-slate-900">{activeTicker} Price Movement</h2>
+                <p className="text-slate-500 font-medium">Historical performance over the last {data.length} days</p>
               </div>
               
               <div className="flex items-center space-x-6 bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
@@ -257,10 +310,20 @@ export default function App() {
                 >
                   Technical Indicators
                 </button>
+                <button
+                  onClick={() => setActiveTab('hill')}
+                  className={`px-6 py-2 rounded-lg text-sm font-bold transition-all ${
+                    activeTab === 'hill' 
+                      ? 'bg-white text-indigo-600 shadow-sm' 
+                      : 'text-slate-500 hover:text-slate-700'
+                  }`}
+                >
+                  Hill Estimator
+                </button>
               </div>
             </div>
 
-            {activeTab === 'price' ? (
+            {activeTab === 'price' && (
               <>
                 {/* Main Chart */}
                 <Card>
@@ -330,7 +393,9 @@ export default function App() {
                   />
                 </div>
               </>
-            ) : (
+            )}
+
+            {activeTab === 'technical' && (
               <div className="space-y-8">
                 {/* Technical Summary Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
@@ -383,6 +448,18 @@ export default function App() {
                           {isNaN(sma200[sma200.length - 1]) ? 'N/A' : `$${sma200[sma200.length - 1].toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
                         </span>
                       </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-500">EMA 50</span>
+                        <span className="font-bold text-indigo-500">
+                          {isNaN(ema50[ema50.length - 1]) ? 'N/A' : `$${ema50[ema50.length - 1].toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm text-slate-500">EMA 200</span>
+                        <span className="font-bold text-amber-500">
+                          {isNaN(ema200[ema200.length - 1]) ? 'N/A' : `$${ema200[ema200.length - 1].toLocaleString(undefined, { maximumFractionDigits: 2 })}`}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -425,8 +502,8 @@ export default function App() {
                   )}
                 </div>
 
-                {/* SMA Chart */}
-                <Card title="SMA 50 vs SMA 200">
+                {/* Moving Averages Chart */}
+                <Card title="Moving Averages: SMA vs EMA">
                   <div className="h-[400px] w-full">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={technicalData}>
@@ -449,8 +526,10 @@ export default function App() {
                           contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0' }}
                         />
                         <Line type="monotone" dataKey="close" stroke="#94a3b8" strokeWidth={1} dot={false} name="Price" />
-                        <Line type="monotone" dataKey="sma50" stroke="#6366f1" strokeWidth={2} dot={false} name="SMA 50" />
-                        <Line type="monotone" dataKey="sma200" stroke="#f59e0b" strokeWidth={2} dot={false} name="SMA 200" />
+                        <Line type="monotone" dataKey="sma50" stroke="#6366f1" strokeWidth={2} dot={false} name="SMA 50" strokeDasharray="5 5" />
+                        <Line type="monotone" dataKey="sma200" stroke="#f59e0b" strokeWidth={2} dot={false} name="SMA 200" strokeDasharray="5 5" />
+                        <Line type="monotone" dataKey="ema50" stroke="#4f46e5" strokeWidth={3} dot={false} name="EMA 50" />
+                        <Line type="monotone" dataKey="ema200" stroke="#d97706" strokeWidth={3} dot={false} name="EMA 200" />
                       </LineChart>
                     </ResponsiveContainer>
                   </div>
@@ -506,6 +585,187 @@ export default function App() {
                     </div>
                   </Card>
                 </div>
+              </div>
+            )}
+
+            {activeTab === 'hill' && (
+              <div className="space-y-8 animate-in fade-in duration-500">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Micro Hill Info */}
+                  <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm">
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="p-3 bg-indigo-50 rounded-xl text-indigo-600">
+                        <Zap size={28} />
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Micro Estimator</span>
+                        <h4 className="text-lg font-bold text-slate-900">{activeTicker} Specific</h4>
+                        <p className="text-[10px] font-bold text-indigo-500 uppercase">180-Day Window</p>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-baseline space-x-3 mb-6">
+                      <span className="text-5xl font-black text-slate-900">{microHill.alpha.toFixed(3)}</span>
+                      <span className="text-lg font-bold text-slate-400">α</span>
+                    </div>
+
+                    <div className="p-4 bg-slate-50 rounded-xl border border-slate-100">
+                      <p className="text-sm text-slate-600 leading-relaxed italic">
+                        "The micro estimator focuses on the last 180 trading days to avoid the 'blurring effect' 
+                        of structural market shifts and captures risk 'here and now'."
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Macro Hill Info */}
+                  <div className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden">
+                    {macroLoading && (
+                      <div className="absolute inset-0 bg-white/80 backdrop-blur-sm z-10 flex flex-col items-center justify-center space-y-3">
+                        <RefreshCw size={32} className="text-indigo-600 animate-spin" />
+                        <p className="text-sm font-bold text-slate-600 uppercase tracking-widest animate-pulse">Aggregating Market Data...</p>
+                      </div>
+                    )}
+                    
+                    <div className="flex items-center justify-between mb-6">
+                      <div className="p-3 bg-rose-50 rounded-xl text-rose-600">
+                        <ShieldAlert size={28} />
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs font-bold text-slate-400 uppercase tracking-widest">Macro Estimator</span>
+                        <h4 className="text-lg font-bold text-slate-900">Total Crypto Market</h4>
+                        <p className="text-[10px] font-bold text-rose-500 uppercase">365-Day Window</p>
+                      </div>
+                    </div>
+
+                    {macroAlpha ? (
+                      <>
+                        <div className="flex items-baseline space-x-3 mb-6">
+                          <span className="text-5xl font-black text-rose-600">{macroAlpha.alpha.toFixed(4)}</span>
+                          <span className="text-lg font-bold text-rose-300">α</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                            <p className="text-xs font-bold text-slate-400 uppercase mb-1">Observations</p>
+                            <p className="text-lg font-bold text-slate-900">{macroAlpha.observations}</p>
+                          </div>
+                          <div className="p-3 bg-slate-50 rounded-lg border border-slate-100">
+                            <p className="text-xs font-bold text-slate-400 uppercase mb-1">Tail Size (k)</p>
+                            <p className="text-lg font-bold text-slate-900">{macroAlpha.k}</p>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="h-32 flex items-center justify-center border-2 border-dashed border-slate-100 rounded-xl">
+                        <p className="text-slate-400 font-medium">Data not initialized</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Rolling Hill Chart */}
+                <Card title={`Rolling Hill Alpha (180-Day Window): ${activeTicker}`}>
+                  <div className="space-y-6">
+                    <p className="text-sm text-slate-500 max-w-3xl">
+                      Tracking structural shifts: Monitoring how Alpha evolves over time helps identify 
+                      regime changes where market tails are becoming heavier or thinner.
+                    </p>
+                    <div className="h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={rollingHillData}>
+                          <defs>
+                            <linearGradient id="colorAlpha" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.1}/>
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="date" 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{fontSize: 10, fill: '#94a3b8'}}
+                            minTickGap={60}
+                          />
+                          <YAxis 
+                            domain={['auto', 'auto']} 
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{fontSize: 10, fill: '#64748b'}}
+                          />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0' }}
+                          />
+                          <Area 
+                            type="monotone" 
+                            dataKey="alpha" 
+                            stroke="#10b981" 
+                            strokeWidth={2} 
+                            fillOpacity={1} 
+                            fill="url(#colorAlpha)" 
+                            name="Rolling Alpha"
+                          />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Hill Plot */}
+                <Card title={`Hill Plot: ${activeTicker} Tail Index Stability`}>
+                  <div className="space-y-6">
+                    <p className="text-sm text-slate-500 max-w-3xl">
+                      The stability of α across different tail sizes (k) indicates the robustness of the estimator. 
+                      A flat region suggests a reliable tail index estimate.
+                    </p>
+                    <div className="h-[400px] w-full">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <LineChart data={hillPlotData}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis 
+                            dataKey="k" 
+                            label={{ value: 'Tail Size (k)', position: 'insideBottom', offset: -10, fontSize: 12, fontWeight: 'bold' }}
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{fontSize: 10, fill: '#94a3b8'}}
+                          />
+                          <YAxis 
+                            label={{ value: 'Hill α', angle: -90, position: 'insideLeft', fontSize: 12, fontWeight: 'bold' }}
+                            axisLine={false} 
+                            tickLine={false} 
+                            tick={{fontSize: 10, fill: '#64748b'}}
+                            domain={['auto', 'auto']}
+                          />
+                          <Tooltip 
+                            contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
+                            formatter={(val: number) => [val.toFixed(4), 'Alpha']}
+                          />
+                          <Line 
+                            type="monotone" 
+                            dataKey="alpha" 
+                            stroke="#6366f1" 
+                            strokeWidth={3} 
+                            dot={false}
+                            animationDuration={1500}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+                </Card>
+
+                {/* Market Basket Info */}
+                <Card title="Macro Estimator Universe">
+                  <div className="flex flex-wrap gap-2">
+                    {api.MACRO_TICKERS.map(t => (
+                      <span key={t} className="px-3 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-bold border border-slate-200">
+                        {t}/USDT
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-400 mt-4 uppercase tracking-widest font-bold">
+                    Aggregated logarithmic returns across top {api.MACRO_TICKERS.length} Binance pairs
+                  </p>
+                </Card>
               </div>
             )}
           </div>

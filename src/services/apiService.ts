@@ -32,7 +32,11 @@ async function fetchWithFallback(path: string) {
   let lastError: any;
   for (const base of BINANCE_BASES) {
     try {
-      const res = await fetch(`${base}${path}`);
+      const res = await fetch(`${base}${path}`, {
+        headers: {
+          'Accept': 'application/json'
+        }
+      });
       if (res.ok) return res;
       lastError = new Error(`Status ${res.status}: ${res.statusText}`);
     } catch (e) {
@@ -61,7 +65,15 @@ export async function fetchBinanceQuote(ticker: string): Promise<QuoteData> {
   };
 }
 
-export async function fetchBinanceCandles(ticker: string, days: number = 730): Promise<AssetData[]> {
+export const MACRO_TICKERS = [
+  "BTC", "ETH", "BNB", "SOL", "XRP",
+  "ADA", "DOGE", "AVAX", "DOT", "POL",
+  "LTC", "BCH", "LINK", "UNI", "ATOM",
+  "XLM", "ETC", "FIL", "TRX", "ICP",
+  "NEAR"
+];
+
+export async function fetchBinanceCandles(ticker: string, days: number = 365): Promise<AssetData[]> {
   const symbol = ticker.replace("-USD", "").toUpperCase() + "USDT";
   const res = await fetchWithFallback(`/api/v3/klines?symbol=${symbol}&interval=1d&limit=${days}`);
   const data = await res.json();
