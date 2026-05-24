@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { 
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  AreaChart, Area, LineChart, Line, BarChart, Bar, Cell
+  AreaChart, Area, LineChart, Line, BarChart, Bar, Cell, ReferenceLine, ReferenceDot
 } from 'recharts';
 import { 
   TrendingUp, TrendingDown, Activity, Search, RefreshCw, AlertTriangle,
-  BarChart3, PieChart, Zap, ShieldAlert
+  BarChart3, PieChart, Zap, ShieldAlert, Pencil, Trash2, Undo
 } from 'lucide-react';
 import { standardDeviation } from 'simple-statistics';
 import * as finance from './services/financeService';
@@ -155,6 +155,110 @@ export default function App() {
   }, [activeTab]);
 
   const prices = data.map(d => d.close);
+  
+  // Slice last 365 days for the main charts
+  const priceChartData = React.useMemo(() => data.slice(-365), [data]);
+
+  // Drawing mode states
+  const [drawingMode, setDrawingMode] = useState(false);
+  const [showBollinger, setShowBollinger] = useState(false);
+  const [lines, setLines] = useState<{ id: string; start: { date: string; close: number; index: number }; end: { date: string; close: number; index: number } }[]>([]);
+  const [activeStartPoint, setActiveStartPoint] = useState<{ date: string; close: number; index: number } | null>(null);
+  const [hoverPoint, setHoverPoint] = useState<{ date: string; close: number; index: number } | null>(null);
+
+  // Calculate Bollinger Beds & Price Overlays
+  const activeChartData = React.useMemo(() => {
+    const prices = priceChartData.map(d => d.close);
+    const period = 20;
+
+    return priceChartData.map((item, i) => {
+      const enriched: any = { ...item };
+
+      // Calculate Bollinger Bands
+      if (i >= period - 1) {
+        const slice = prices.slice(i - period + 1, i + 1);
+        const sum = slice.reduce((a, b) => a + b, 0);
+        const mean = sum / period;
+        
+        const squareDiffs = slice.map(v => Math.pow(v - mean, 2));
+        const avgSquareDiff = squareDiffs.reduce((a, b) => a + b, 0) / period;
+        const stdDev = Math.sqrt(avgSquareDiff);
+
+        enriched.bbUpper = mean + 2 * stdDev;
+        enriched.bbMiddle = mean;
+        enriched.bbLower = mean - 2 * stdDev;
+      } else {
+        enriched.bbUpper = null;
+        enriched.bbMiddle = null;
+        enriched.bbLower = null;
+      }
+
+      return enriched;
+    });
+  }, [priceChartData]);
+
+  const handleChartClick = (nextState: any) => {
+    if (!drawingMode || !nextState) return;
+
+    let idx = nextState.activeTooltipIndex;
+    if (typeof idx !== 'number' && nextState.activeLabel) {
+      idx = priceChartData.findIndex(d => d.date === nextState.activeLabel);
+    }
+
+    if (typeof idx !== 'number' || idx < 0) return;
+    const clickedPoint = priceChartData[idx];
+    if (!clickedPoint) return;
+
+    if (!activeStartPoint) {
+      // First click: Lock point A
+      setActiveStartPoint({
+        date: clickedPoint.date,
+        close: clickedPoint.close,
+        index: idx
+      });
+      setHoverPoint({
+        date: clickedPoint.date,
+        close: clickedPoint.close,
+        index: idx
+      });
+    } else {
+      // Second click: Lock point B and create ruler line segment
+      if (idx !== activeStartPoint.index) {
+        const newLine = {
+          id: Date.now().toString(),
+          start: activeStartPoint,
+          end: {
+            date: clickedPoint.date,
+            close: clickedPoint.close,
+            index: idx
+          }
+        };
+        setLines(prev => [...prev, newLine]);
+      }
+      // Reset points for subsequent lines
+      setActiveStartPoint(null);
+      setHoverPoint(null);
+    }
+  };
+
+  const handleChartMouseMove = (nextState: any) => {
+    if (!drawingMode || !activeStartPoint || !nextState) return;
+
+    let idx = nextState.activeTooltipIndex;
+    if (typeof idx !== 'number' && nextState.activeLabel) {
+      idx = priceChartData.findIndex(d => d.date === nextState.activeLabel);
+    }
+
+    if (typeof idx !== 'number' || idx < 0) return;
+    const hoveredData = priceChartData[idx];
+    if (hoveredData) {
+      setHoverPoint({
+        date: hoveredData.date,
+        close: hoveredData.close,
+        index: idx
+      });
+    }
+  };
   
   // Technical Indicators Calculation
   const sma50 = finance.calculateSMA(prices, 50);
@@ -327,9 +431,82 @@ export default function App() {
               <>
                 {/* Main Chart */}
                 <Card>
-                  <div className="h-[500px] w-full">
+                  <div className="flex items-center justify-between pb-4 mb-6 border-b border-slate-100/90">
+                    <span className="text-xs font-semibold text-slate-400 uppercase tracking-widest">Price Action</span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setShowBollinger(!showBollinger)}
+                        className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                          showBollinger 
+                            ? 'bg-emerald-50 border-emerald-200 text-emerald-600 shadow-sm' 
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Activity size={13} className={showBollinger ? 'animate-pulse' : ''} />
+                        <span>Bollinger {showBollinger ? 'On' : 'Off'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDrawingMode(!drawingMode);
+                          setActiveStartPoint(null);
+                          setHoverPoint(null);
+                        }}
+                        className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all border ${
+                          drawingMode 
+                            ? 'bg-indigo-50 border-indigo-200 text-indigo-600 shadow-sm' 
+                            : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                        }`}
+                      >
+                        <Pencil size={13} className={drawingMode ? 'animate-pulse' : ''} />
+                        <span>{drawingMode ? 'Drawing On' : 'Drawing Off'}</span>
+                      </button>
+
+                      {(lines.length > 0 || activeStartPoint) && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (activeStartPoint) {
+                                setActiveStartPoint(null);
+                                setHoverPoint(null);
+                              } else {
+                                setLines(prev => prev.slice(0, -1));
+                              }
+                            }}
+                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-50 transition-colors"
+                            title="Undo last action"
+                          >
+                            <Undo size={13} />
+                            <span>Undo</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setLines([]);
+                              setActiveStartPoint(null);
+                              setHoverPoint(null);
+                            }}
+                            className="flex items-center space-x-1.5 px-3 py-1.5 bg-white border border-rose-200 rounded-xl text-xs font-bold text-rose-600 hover:bg-rose-50/50 transition-colors"
+                            title="Clear all"
+                          >
+                            <Trash2 size={13} />
+                            <span>Clear ({lines.length})</span>
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className={`h-[500px] w-full select-none ${drawingMode ? 'cursor-crosshair' : 'cursor-default'}`}>
                     <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={data.slice(-365)}>
+                      <AreaChart 
+                        data={activeChartData}
+                        onMouseDown={handleChartClick}
+                        onMouseMove={handleChartMouseMove}
+                      >
                         <defs>
                           <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
                             <stop offset="5%" stopColor="#6366f1" stopOpacity={0.1}/>
@@ -353,7 +530,12 @@ export default function App() {
                         />
                         <Tooltip 
                           contentStyle={{ backgroundColor: '#fff', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)' }}
-                          formatter={(val: number) => [`$${val.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Price']}
+                          formatter={(val: number, name: string) => {
+                            if (name === 'bbUpper') return [`$${val?.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Bollinger Upper'];
+                            if (name === 'bbMiddle') return [`$${val?.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Bollinger Middle'];
+                            if (name === 'bbLower') return [`$${val?.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Bollinger Lower'];
+                            return [`$${val?.toLocaleString(undefined, { minimumFractionDigits: 2 })}`, 'Price'];
+                          }}
                         />
                         <Area 
                           type="monotone" 
@@ -364,6 +546,117 @@ export default function App() {
                           fill="url(#colorPrice)" 
                           animationDuration={1500}
                         />
+                        {/* Bollinger Bands Lines */}
+                        {showBollinger && (
+                          <Line 
+                            type="monotone" 
+                            dataKey="bbUpper" 
+                            stroke="#10b981" 
+                            strokeWidth={1.5} 
+                            strokeDasharray="3 3"
+                            dot={false}
+                            connectNulls={true}
+                            legendType="none"
+                            activeDot={false}
+                            animationDuration={300}
+                          />
+                        )}
+                        {showBollinger && (
+                          <Line 
+                            type="monotone" 
+                            dataKey="bbMiddle" 
+                            stroke="#059669" 
+                            strokeWidth={1} 
+                            strokeDasharray="4 4"
+                            dot={false}
+                            connectNulls={true}
+                            legendType="none"
+                            activeDot={false}
+                            animationDuration={300}
+                          />
+                        )}
+                        {showBollinger && (
+                          <Line 
+                            type="monotone" 
+                            dataKey="bbLower" 
+                            stroke="#10b981" 
+                            strokeWidth={1.5} 
+                            strokeDasharray="3 3"
+                            dot={false}
+                            connectNulls={true}
+                            legendType="none"
+                            activeDot={false}
+                            animationDuration={300}
+                          />
+                        )}
+
+                        {/* Completed Lines */}
+                        {lines.map((line) => (
+                          <ReferenceLine 
+                            key={`line_${line.id}`}
+                            segment={[
+                              { x: line.start.date, y: line.start.close },
+                              { x: line.end.date, y: line.end.close }
+                            ]}
+                            stroke="#ef4444" 
+                            strokeWidth={3}
+                          />
+                        ))}
+                        {lines.map((line) => (
+                          <ReferenceDot 
+                            key={`dot_start_${line.id}`}
+                            x={line.start.date} 
+                            y={line.start.close} 
+                            r={4.5} 
+                            fill="#ef4444" 
+                            stroke="#fff" 
+                            strokeWidth={1.5} 
+                          />
+                        ))}
+                        {lines.map((line) => (
+                          <ReferenceDot 
+                            key={`dot_end_${line.id}`}
+                            x={line.end.date} 
+                            y={line.end.close} 
+                            r={4.5} 
+                            fill="#ef4444" 
+                            stroke="#fff" 
+                            strokeWidth={1.5} 
+                          />
+                        ))}
+
+                        {/* Active Preview Line */}
+                        {activeStartPoint && hoverPoint && (
+                          <ReferenceLine 
+                            segment={[
+                              { x: activeStartPoint.date, y: activeStartPoint.close },
+                              { x: hoverPoint.date, y: hoverPoint.close }
+                            ]}
+                            stroke="#8b5cf6" 
+                            strokeWidth={2} 
+                            strokeDasharray="4 4"
+                          />
+                        )}
+                        {activeStartPoint && (
+                          <ReferenceDot 
+                            x={activeStartPoint.date} 
+                            y={activeStartPoint.close} 
+                            r={4.5} 
+                            fill="#8b5cf6" 
+                            stroke="#fff" 
+                            strokeWidth={1.5} 
+                          />
+                        )}
+                        {activeStartPoint && hoverPoint && (
+                          <ReferenceDot 
+                            x={hoverPoint.date} 
+                            y={hoverPoint.close} 
+                            r={4.5} 
+                            fill="#8b5cf6" 
+                            stroke="#fff" 
+                            strokeWidth={1.5} 
+                          />
+                        )}
                       </AreaChart>
                     </ResponsiveContainer>
                   </div>
