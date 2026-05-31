@@ -3,9 +3,9 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   AreaChart, Area, LineChart, Line, BarChart, Bar, Cell, ReferenceLine, ReferenceDot
 } from 'recharts';
-import { 
+   import { 
   TrendingUp, TrendingDown, Activity, Search, RefreshCw, AlertTriangle,
-  BarChart3, PieChart, Zap, ShieldAlert, Pencil, Trash2, Undo
+  BarChart3, PieChart, Zap, ShieldAlert, Coins, ShieldCheck, ShieldX, ShieldOff, Pencil, Trash2, Undo
 } from 'lucide-react';
 import { standardDeviation } from 'simple-statistics';
 import * as finance from './services/financeService';
@@ -324,7 +324,7 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white shadow-md">
-              <Activity size={20} />
+            <Coins size={20} className="animate-bounce" />
             </div>
             <h1 className="text-lg font-bold tracking-tight uppercase tracking-widest text-indigo-700">Financial Modelling Pro</h1>
           </div>
